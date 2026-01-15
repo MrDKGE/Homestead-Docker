@@ -1,0 +1,17 @@
+services:
+  homestead-server:
+    image: ghcr.io/mrdkge/homestead-docker:latest
+    container_name: homestead-minecraft
+    restart: unless-stopped
+    ports:
+      - "25565:25565"  # Minecraft server port
+      - "24454:24454/udp"  # Voice chat port
+    volumes:
+      - ./zip:/serverpack:ro
+      - ./server-data:/server
+    environment:
+      - MEMORY=10G
+      - EULA=true
+    stdin_open: true
+    tty: true
+    stop_grace_period: 60s

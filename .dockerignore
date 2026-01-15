@@ -1,0 +1,13 @@
+# Exclude server data directory (this is created by Docker)
+server-data/
+
+# Exclude git files
+.git/
+.gitignore
+
+# Exclude documentation
+*.md
+
+# Exclude IDE files
+.vscode/
+.idea/

@@ -1,0 +1,9 @@
+# Server data (world, logs, etc.)
+server-data/
+
+# IDE
+.vscode/
+.idea/
+
+# Archive files
+zip/
