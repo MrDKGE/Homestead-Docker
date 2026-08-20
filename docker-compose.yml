@@ -13,6 +13,9 @@ services:
     environment:
       MEMORY: 10G
       EULA: "true"
+      # Optional: use "latest" or an exact version such as "1.3.7".
+      # Leave unset to keep selecting manually downloaded ZIPs from ./zip.
+      # VERSION: latest
       # Set this to a backup filename from ./zip for a one-time restore.
       # RESTORE_BACKUP: homestead-backup-1.3.6-20260820-120000-upgrade.zip
     stdin_open: true

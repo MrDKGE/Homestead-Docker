@@ -48,7 +48,23 @@ make_fake_runtime() {
         '#!/usr/bin/env bash' \
         'set -Eeuo pipefail' \
         'printf "CURL %s\n" "$*" >> "$TEST_EVENT_LOG"' \
-        'touch "$2"' \
+        'output=""' \
+        'previous=""' \
+        'for argument in "$@"; do' \
+        '    if [[ "$previous" == "-o" || "$previous" == *o ]]; then output="$argument"; fi' \
+        '    previous="$argument"' \
+        'done' \
+        'url="${*: -1}"' \
+        'if [[ "$url" == "${AUTO_DOWNLOAD_TEST_INDEX_URL:-}" ]]; then' \
+        '    [[ "${AUTO_DOWNLOAD_TEST_FAIL:-}" != "index" ]] || exit 22' \
+        '    cp "$AUTO_DOWNLOAD_TEST_INDEX" "$output"' \
+        'elif [[ "$url" == https://downloads.test/* ]]; then' \
+        '    [[ "${AUTO_DOWNLOAD_TEST_FAIL:-}" != "download" ]] || exit 22' \
+        '    version=$(printf "%s\n" "$url" | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?")' \
+        '    cp "$AUTO_DOWNLOAD_TEST_PACK_DIR/Homestead$version.zip" "$output"' \
+        'else' \
+        '    touch "$output"' \
+        'fi' \
         > "$bin_dir/fake-curl"
 
     printf '%s\n' \
@@ -63,6 +79,17 @@ make_fake_runtime() {
         > "$bin_dir/fake-java"
 
     chmod +x "$bin_dir/fake-curl" "$bin_dir/fake-java"
+}
+
+make_download_index() {
+    local output="$1"
+    shift
+    : > "$output"
+    local version
+    for version in "$@"; do
+        printf '<a href="https://downloads.test/Homestead%s.zip">Download Homestead Server Pack %s</a>\n' \
+            "$version" "$version" >> "$output"
+    done
 }
 
 make_pack() {
@@ -169,10 +196,10 @@ test_upgrade_backup_restore_and_repeat_guard() {
     assert_equals "$(cat "$case_dir/server/.fabric-runtime")" "1.20.1|0.18.4|1.1.1"
     assert_equals "$(grep -c '^INSTALL ' "$case_dir/events.log")" "2"
 
-    backup=$(find "$case_dir/server/backups" -name '*-upgrade.zip' -type f | head -n1)
+    backup=$(find "$case_dir/server/backups" -name '*-upgrade.zip' -type f -print -quit)
     assert_file "$backup"
-    unzip -Z1 "$backup" | grep -Fxq 'world/save.txt' || fail "backup does not contain the world"
-    if unzip -Z1 "$backup" | grep -Eq '^(libraries|versions)/|^server\.jar$|^fabric-server-launch\.jar$'; then
+    grep -Fxq 'world/save.txt' < <(unzip -Z1 "$backup") || fail "backup does not contain the world"
+    if grep -Eq '^(libraries|versions)/|^server\.jar$|^fabric-server-launch\.jar$' < <(unzip -Z1 "$backup"); then
         fail "backup contains generated runtime files"
     fi
 
@@ -206,7 +233,7 @@ test_refresh_downgrade_and_corrupt_archive_guards() {
     run_entrypoint "$case_dir"
     assert_equals "$(cat "$case_dir/server/mods/pack-marker.txt")" "refreshed"
     assert_no_path "$case_dir/server/mods/stale.jar"
-    find "$case_dir/server/backups" -name '*-refresh.zip' -type f | grep -q . || fail "refresh backup missing"
+    [[ -n "$(find "$case_dir/server/backups" -name '*-refresh.zip' -type f -print -quit)" ]] || fail "refresh backup missing"
 
     make_pack "$case_dir/packs" 2.0.0 0.18.2 refreshed-again
     run_entrypoint "$case_dir"
@@ -228,6 +255,147 @@ test_refresh_downgrade_and_corrupt_archive_guards() {
     fi
     assert_equals "$(cat "$case_dir/server/mods/pack-marker.txt")" "refreshed-again"
     assert_contains "$case_dir/output.log" "Archive failed its integrity check"
+}
+
+test_auto_download_fresh_exact_latest_and_cache() {
+    local latest_case exact_case index source_dir
+
+    latest_case=$(new_case auto-latest)
+    source_dir="$latest_case/downloads"
+    index="$latest_case/index.html"
+    make_pack "$source_dir" 3.0.0 0.18.0 downloaded-latest
+    make_download_index "$index" 2.9.0 3.0.0
+    make_pack "$latest_case/packs" 1.0.0 0.16.0 stale-local
+    chmod 0555 "$latest_case/packs"
+
+    run_entrypoint "$latest_case" \
+        VERSION=latest \
+        AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX="$index" \
+        AUTO_DOWNLOAD_TEST_PACK_DIR="$source_dir"
+
+    assert_equals "$(cat "$latest_case/server/.installed")" "3.0.0"
+    assert_equals "$(cat "$latest_case/server/mods/pack-marker.txt")" "downloaded-latest"
+    assert_file "$latest_case/server/.serverpack-cache/Homestead3.0.0_server_pack.zip"
+    assert_equals "$(grep -c 'https://downloads.test/' "$latest_case/events.log")" "1"
+
+    run_entrypoint "$latest_case" \
+        VERSION=latest \
+        AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX="$index" \
+        AUTO_DOWNLOAD_TEST_PACK_DIR="$source_dir"
+    assert_equals "$(grep -c 'https://downloads.test/' "$latest_case/events.log")" "1"
+    assert_contains "$latest_case/output.log" "Using cached Homestead server pack v3.0.0"
+
+    exact_case=$(new_case auto-exact)
+    source_dir="$exact_case/downloads"
+    index="$exact_case/index.html"
+    make_pack "$source_dir" 2.5.0 0.17.5 pinned
+    make_pack "$exact_case/packs" 9.0.0 0.19.0 newer-local
+    make_download_index "$index" 2.5.0 9.0.0
+
+    run_entrypoint "$exact_case" \
+        VERSION=2.5.0 \
+        AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX="$index" \
+        AUTO_DOWNLOAD_TEST_PACK_DIR="$source_dir"
+    assert_equals "$(cat "$exact_case/server/.installed")" "2.5.0"
+    assert_equals "$(cat "$exact_case/server/mods/pack-marker.txt")" "pinned"
+
+    run_entrypoint "$exact_case" \
+        VERSION=2.5.0 AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_FAIL=index
+    assert_equals "$(cat "$exact_case/server/.installed")" "2.5.0"
+    assert_contains "$exact_case/output.log" "Using cached Homestead server pack v2.5.0"
+}
+
+test_auto_download_update_failure_and_downgrade_guards() {
+    local case_dir index source_dir
+    case_dir=$(new_case auto-update)
+    source_dir="$case_dir/downloads"
+    index="$case_dir/index.html"
+    make_pack "$source_dir" 4.0.0 0.18.0 initial
+    make_download_index "$index" 4.0.0
+    run_entrypoint "$case_dir" \
+        VERSION=latest AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX_URL=https://test.invalid/index AUTO_DOWNLOAD_TEST_INDEX="$index" \
+        AUTO_DOWNLOAD_TEST_PACK_DIR="$source_dir"
+
+    mkdir -p "$case_dir/server/world"
+    printf 'world-data' > "$case_dir/server/world/save.txt"
+    make_pack "$source_dir" 4.1.0 0.18.1 update
+    make_download_index "$index" 4.1.0 4.0.0
+    if run_entrypoint "$case_dir" \
+        VERSION=latest AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX_URL=https://test.invalid/index AUTO_DOWNLOAD_TEST_INDEX="$index" \
+        AUTO_DOWNLOAD_TEST_PACK_DIR="$source_dir" AUTO_DOWNLOAD_TEST_FAIL=download; then
+        fail "failed automatic download unexpectedly succeeded"
+    fi
+    assert_equals "$(cat "$case_dir/server/.installed")" "4.0.0"
+    assert_equals "$(cat "$case_dir/server/world/save.txt")" "world-data"
+    assert_no_path "$case_dir/server/.serverpack-cache/Homestead4.1.0_server_pack.zip.partial"
+
+    run_entrypoint "$case_dir" \
+        VERSION=latest AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX_URL=https://test.invalid/index AUTO_DOWNLOAD_TEST_INDEX="$index" \
+        AUTO_DOWNLOAD_TEST_PACK_DIR="$source_dir"
+    assert_equals "$(cat "$case_dir/server/.installed")" "4.1.0"
+    assert_equals "$(cat "$case_dir/server/world/save.txt")" "world-data"
+    [[ -n "$(find "$case_dir/server/backups" -name '*-upgrade.zip' -type f -print -quit)" ]] || fail "automatic update backup missing"
+
+    make_download_index "$index" 4.0.0
+    if run_entrypoint "$case_dir" \
+        VERSION=latest AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX_URL=https://test.invalid/index AUTO_DOWNLOAD_TEST_INDEX="$index" \
+        AUTO_DOWNLOAD_TEST_PACK_DIR="$source_dir"; then
+        fail "automatic downgrade unexpectedly succeeded"
+    fi
+    assert_equals "$(cat "$case_dir/server/.installed")" "4.1.0"
+    assert_contains "$case_dir/output.log" "Downgrade blocked"
+}
+
+test_auto_download_validation_and_restore_precedence() {
+    local invalid_case corrupt_case restore_case backup backup_name index source_dir
+    invalid_case=$(new_case auto-invalid)
+    if run_entrypoint "$invalid_case" VERSION=current; then
+        fail "invalid VERSION unexpectedly succeeded"
+    fi
+    assert_contains "$invalid_case/output.log" "VERSION must be 'latest'"
+
+    corrupt_case=$(new_case auto-corrupt)
+    source_dir="$corrupt_case/downloads"
+    index="$corrupt_case/index.html"
+    mkdir -p "$source_dir"
+    printf 'not-a-zip' > "$source_dir/Homestead6.0.0.zip"
+    make_download_index "$index" 6.0.0
+    if run_entrypoint "$corrupt_case" \
+        VERSION=latest AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index \
+        AUTO_DOWNLOAD_TEST_INDEX_URL=https://test.invalid/index AUTO_DOWNLOAD_TEST_INDEX="$index" \
+        AUTO_DOWNLOAD_TEST_PACK_DIR="$source_dir"; then
+        fail "invalid automatic download unexpectedly succeeded"
+    fi
+    assert_contains "$corrupt_case/output.log" "Archive failed its integrity check"
+    assert_no_path "$corrupt_case/server/.serverpack-cache/Homestead6.0.0_server_pack.zip"
+    assert_no_path "$corrupt_case/server/.serverpack-cache/Homestead6.0.0_server_pack.zip.partial"
+
+    restore_case=$(new_case auto-restore)
+    make_pack "$restore_case/packs" 5.0.0 0.18.0 current
+    run_entrypoint "$restore_case"
+    mkdir -p "$restore_case/server/world"
+    printf 'before-update' > "$restore_case/server/world/save.txt"
+    make_pack "$restore_case/packs" 5.1.0 0.18.1 update
+    run_entrypoint "$restore_case"
+    backup=$(find "$restore_case/server/backups" -name '*-upgrade.zip' -type f -print -quit)
+    backup_name=$(basename "$backup")
+    cp "$backup" "$restore_case/packs/$backup_name"
+
+    run_entrypoint "$restore_case" RESTORE_BACKUP="$backup_name" VERSION=latest \
+        AUTO_DOWNLOAD_INDEX_URL=https://test.invalid/index AUTO_DOWNLOAD_TEST_FAIL=index
+    assert_equals "$(cat "$restore_case/server/.installed")" "5.0.0"
+    assert_equals "$(cat "$restore_case/server/world/save.txt")" "before-update"
 }
 
 test_invalid_memory_and_missing_pack() {
@@ -284,6 +452,9 @@ test_invalid_memory_and_missing_pack() {
 test_fresh_install_and_version_selection
 test_upgrade_backup_restore_and_repeat_guard
 test_refresh_downgrade_and_corrupt_archive_guards
+test_auto_download_fresh_exact_latest_and_cache
+test_auto_download_update_failure_and_downgrade_guards
+test_auto_download_validation_and_restore_precedence
 test_invalid_memory_and_missing_pack
 
 echo "All entrypoint tests passed"

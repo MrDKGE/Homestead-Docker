@@ -28,6 +28,17 @@ Run the Homestead modded Minecraft server with Docker. Java and the Fabric runti
 
 The first startup downloads Minecraft and Fabric and can take several minutes.
 
+### Optional automatic server-pack download
+
+Manual ZIP selection remains the default. To opt in, set one of these values in the Compose `environment` section:
+
+```yaml
+VERSION: latest  # Follow the newest official server pack
+# VERSION: "1.3.7"  # Pin one exact version instead
+```
+
+An exact version is selected even when newer ZIPs are present in `zip/`. It does not disable the downgrade guard: use a backup restore for an intentional rollback. Downloads are validated and moved atomically into `server-data/.serverpack-cache/`; cached exact versions do not require another network request, while `latest` checks the official page for updates on each start. Unset `VERSION` to return to manual local ZIP selection.
+
 ## Commands
 
 ```bash
@@ -74,7 +85,7 @@ Setting `EULA=true` records acceptance of the [Minecraft EULA](https://www.minec
 ## Data and ports
 
 - `zip/`: read-only server-pack and restore archives
-- `server-data/`: worlds, configuration, generated runtime, and backups
+- `server-data/`: worlds, configuration, generated runtime, backups, and the automatic-download cache
 - `25565/tcp`: Minecraft
 - `24454/udp`: proximity voice chat
 
@@ -93,6 +104,7 @@ docker build -t homestead-docker:local .
 ## Troubleshooting
 
 - **No server pack found:** Ensure the ZIP filename contains a version such as `1.3.7`.
+- **Automatic download fails:** Check access to `cozystudios.org` and Google Drive. A failed or invalid download is discarded without changing the installed server.
 - **Out of memory:** Increase Docker's memory allocation or lower `MEMORY`.
 - **Cannot connect:** Wait for `Done` in `docker compose logs -f`.
 - **Update is rejected:** The selected ZIP is older than `.installed`; restore a backup for intentional rollbacks.

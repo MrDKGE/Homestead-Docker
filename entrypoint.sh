@@ -9,10 +9,13 @@ INSTALLED_ARCHIVE_FILE="$SERVER_DIR/.installed-archive"
 FABRIC_RUNTIME_FILE="$SERVER_DIR/.fabric-runtime"
 RESTORE_MARKER_FILE="$SERVER_DIR/.last-restored-backup"
 BACKUP_DIR="$SERVER_DIR/backups"
+DOWNLOAD_CACHE_DIR="$SERVER_DIR/.serverpack-cache"
 
 MEMORY_OVERRIDE="${MEMORY:-}"
 EULA="${EULA:-false}"
 RESTORE_BACKUP="${RESTORE_BACKUP:-}"
+VERSION="${VERSION:-}"
+AUTO_DOWNLOAD_INDEX_URL="${AUTO_DOWNLOAD_INDEX_URL:-https://cozystudios.org/homestead/server-pack/}"
 JAVA_BIN="${JAVA_BIN:-java}"
 CURL_BIN="${CURL_BIN:-curl}"
 
@@ -87,6 +90,116 @@ get_latest_zip() {
     shopt -u nullglob
 
     printf '%s\n' "$best"
+}
+
+get_zip_for_version() {
+    local requested_version="$1" file version
+
+    shopt -s nullglob
+    for file in "$DOWNLOAD_CACHE_DIR"/*.zip "$SERVERPACK_DIR"/*.zip; do
+        [[ "$(basename "$file")" == *backup* ]] && continue
+        version=$(extract_version "$(basename "$file")" || true)
+        if [[ "$version" == "$requested_version" ]]; then
+            shopt -u nullglob
+            printf '%s\n' "$file"
+            return 0
+        fi
+    done
+    shopt -u nullglob
+    return 1
+}
+
+resolve_download_link() {
+    local requested_version="$1" index_file="$TMP_BASE/server-pack-index.html"
+    local line version href best_version="" best_href=""
+
+    log "Checking official Homestead server packs..." >&2
+    if ! "$CURL_BIN" -fsSLo "$index_file" "$AUTO_DOWNLOAD_INDEX_URL"; then
+        error "Could not retrieve the Homestead server-pack index"
+        return 1
+    fi
+
+    while IFS= read -r line; do
+        version=$(extract_version "$line" || true)
+        href=$(printf '%s\n' "$line" | sed -n 's/.*href="\([^"]*\)"[^>]*>[^<]*Download Homestead Server Pack.*/\1/p')
+        [[ -n "$version" && -n "$href" ]] || continue
+        href=${href//&amp;/&}
+
+        if [[ "$requested_version" != "latest" ]]; then
+            if [[ "$version" == "$requested_version" ]]; then
+                printf '%s\t%s\n' "$version" "$href"
+                return 0
+            fi
+        elif [[ -z "$best_version" || "$(printf '%s\n' "$best_version" "$version" | sort -V | tail -n1)" == "$version" ]]; then
+            best_version="$version"
+            best_href="$href"
+        fi
+    done < <(tr '>' '>\n' < "$index_file" | grep 'Download Homestead Server Pack' || true)
+
+    if [[ "$requested_version" == "latest" && -n "$best_version" ]]; then
+        printf '%s\t%s\n' "$best_version" "$best_href"
+        return 0
+    fi
+
+    error "Homestead server pack '$requested_version' was not found on the official download page"
+    return 1
+}
+
+direct_download_url() {
+    local url="$1" file_id
+
+    if [[ "$url" =~ drive\.google\.com/file/d/([^/]+) ]]; then
+        file_id="${BASH_REMATCH[1]}"
+        printf 'https://drive.usercontent.google.com/download?id=%s&export=download&confirm=t\n' "$file_id"
+    else
+        printf '%s\n' "$url"
+    fi
+}
+
+prepare_auto_download() {
+    local requested_version="$VERSION" resolved version url cached
+    local final_archive partial_archive
+
+    if [[ "$requested_version" != "latest" && ! "$requested_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+        error "VERSION must be 'latest' or an exact version such as 1.3.7"
+        return 1
+    fi
+
+    # An exact local/cache hit needs no network lookup and must win over newer ZIPs.
+    if [[ "$requested_version" != "latest" ]] && cached=$(get_zip_for_version "$requested_version"); then
+        log "Using cached Homestead server pack v$requested_version: $(basename "$cached")" >&2
+        printf '%s\n' "$cached"
+        return 0
+    fi
+
+    resolved=$(resolve_download_link "$requested_version") || return 1
+    IFS=$'\t' read -r version url <<< "$resolved"
+
+    if cached=$(get_zip_for_version "$version"); then
+        log "Using cached Homestead server pack v$version: $(basename "$cached")" >&2
+        printf '%s\n' "$cached"
+        return 0
+    fi
+
+    mkdir -p "$DOWNLOAD_CACHE_DIR"
+    final_archive="$DOWNLOAD_CACHE_DIR/Homestead${version}_server_pack.zip"
+    partial_archive="$final_archive.partial"
+    rm -f "$partial_archive"
+    url=$(direct_download_url "$url")
+
+    log "Downloading Homestead server pack v$version..." >&2
+    if ! "$CURL_BIN" -fsSL --retry 3 --retry-delay 2 -o "$partial_archive" "$url"; then
+        rm -f "$partial_archive"
+        error "Could not download Homestead server pack v$version"
+        return 1
+    fi
+    if ! validate_archive "$partial_archive"; then
+        rm -f "$partial_archive"
+        return 1
+    fi
+    mv "$partial_archive" "$final_archive"
+    log "Cached Homestead server pack v$version" >&2
+    printf '%s\n' "$final_archive"
 }
 
 validate_archive() {
@@ -203,6 +316,7 @@ create_backup() {
         zip -q -r "$temp_archive" . \
             -x "*.log" "logs/*" "crash-reports/*" "backups/*" \
                ".installed" ".installed-archive" ".fabric-runtime" ".last-restored-backup" \
+               ".serverpack-cache" ".serverpack-cache/*" \
                ".fabric/*" ".mixin.out/*" \
                "fabric-installer-*.jar" "fabric-server-launch.jar" \
                "fabric-server-launcher.properties" "server.jar" \
@@ -217,7 +331,7 @@ clear_server_for_restore() {
 
     shopt -s nullglob dotglob
     for path in "$SERVER_DIR"/*; do
-        [[ "$path" == "$BACKUP_DIR" ]] && continue
+        [[ "$path" == "$BACKUP_DIR" || "$path" == "$DOWNLOAD_CACHE_DIR" ]] && continue
         rm -rf "$path"
     done
     shopt -u nullglob dotglob
@@ -380,7 +494,11 @@ else
     # Unsetting RESTORE_BACKUP explicitly re-enables this backup for a future restore.
     rm -f "$RESTORE_MARKER_FILE"
 
-    SERVERPACK_ZIP=$(get_latest_zip)
+    if [[ -n "$VERSION" ]]; then
+        SERVERPACK_ZIP=$(prepare_auto_download) || exit 1
+    else
+        SERVERPACK_ZIP=$(get_latest_zip)
+    fi
     [[ -n "$SERVERPACK_ZIP" ]] || {
         error "No versioned server pack ZIP found in $SERVERPACK_DIR"
         exit 1
