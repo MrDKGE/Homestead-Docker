@@ -6,7 +6,7 @@ FROM eclipse-temurin:17-jdk-jammy
 LABEL org.opencontainers.image.title="Homestead Minecraft Server" \
       org.opencontainers.image.description="Dockerized Homestead modpack server with automatic version management" \
       org.opencontainers.image.authors="homestead-docker" \
-      org.opencontainers.image.source="https://github.com/CozyCord/homestead" \
+      org.opencontainers.image.source="https://github.com/MrDKGE/Homestead-Docker" \
       minecraft.version="1.20.1" \
       modpack="homestead"
 
@@ -14,7 +14,6 @@ LABEL org.opencontainers.image.title="Homestead Minecraft Server" \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
-        wget \
         unzip \
         zip \
         ca-certificates && \
@@ -25,7 +24,7 @@ RUN apt-get update && \
 WORKDIR /server
 
 # Create necessary directories
-RUN mkdir -p /server /serverpack
+RUN mkdir -p /serverpack
 
 # Copy entrypoint script
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
@@ -41,7 +40,7 @@ ENV MEMORY="6G" \
     EULA="false" \
     FABRIC_INSTALLER_VERSION="1.1.1" \
     MINECRAFT_VERSION="1.20.1" \
-    MODLOADER_VERSION="0.17.2"
+    MODLOADER_VERSION="0.18.4"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5m --retries=3 \

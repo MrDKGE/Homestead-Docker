@@ -1,7 +1,8 @@
 services:
   homestead-server:
+    build:
+      context: .
     image: ghcr.io/mrdkge/homestead-docker:latest
-    container_name: homestead-minecraft
     restart: unless-stopped
     ports:
       - "25565:25565"  # Minecraft server port
@@ -10,8 +11,10 @@ services:
       - ./zip:/serverpack:ro
       - ./server-data:/server
     environment:
-      - MEMORY=10G
-      - EULA=true
+      MEMORY: 10G
+      EULA: "true"
+      # Set this to a backup filename from ./zip for a one-time restore.
+      # RESTORE_BACKUP: homestead-backup-1.3.6-20260820-120000-upgrade.zip
     stdin_open: true
     tty: true
     stop_grace_period: 60s

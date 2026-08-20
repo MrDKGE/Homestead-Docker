@@ -1,5 +1,6 @@
 # Exclude server data directory (this is created by Docker)
 server-data/
+zip/
 
 # Exclude git files
 .git/
@@ -7,6 +8,11 @@ server-data/
 
 # Exclude documentation
 *.md
+
+# Exclude development and CI files
+.github/
+tests/
+docker-compose.yml
 
 # Exclude IDE files
 .vscode/

@@ -1,40 +1,61 @@
 # Homestead Minecraft Server - Docker
 
-Run the Homestead modded Minecraft server in Docker.
+Run the Homestead modded Minecraft server with Docker. Java and the Fabric runtime are installed inside the image.
 
-## Download
+## Requirements
 
-- **Server Pack**: [Get from Wiki](https://github.com/CozyCord/homestead/wiki/Server-Pack)
-- **Client**: [Download from CurseForge](https://www.curseforge.com/minecraft/modpacks/homestead-cozy)
+- Docker Desktop or Docker Engine with Compose
+- 12-16 GB of memory available to Docker for the default 10 GB server allocation
+- The official Homestead server-pack ZIP
 
-## Quick Start
+## Quick start
 
-1. Download server pack zip and place in `zip/` folder
-2. Run: `docker-compose up -d --build`
-3. Connect to `localhost:25565`
+1. Download the latest [Homestead server pack](https://cozystudios.org/homestead/server-pack/).
+2. Place the ZIP in the `zip/` directory without extracting it.
+3. Start the server:
 
-First startup takes 3-5 minutes.
+   ```bash
+   docker compose up -d --build
+   ```
+
+4. Follow startup until Minecraft reports `Done`:
+
+   ```bash
+   docker compose logs -f
+   ```
+
+5. Connect to `localhost:25565`.
+
+The first startup downloads Minecraft and Fabric and can take several minutes.
 
 ## Commands
 
 ```bash
-docker-compose up -d       # Start
-docker-compose stop        # Stop
-docker-compose restart     # Restart
-docker-compose logs -f     # View logs
-docker-compose down        # Remove
+docker compose up -d --build  # Build and start
+docker compose stop           # Graceful stop and world save
+docker compose restart        # Restart
+docker compose logs -f        # Follow logs
+docker compose down           # Remove the container and network; data remains
 ```
 
-## Updating
+## Updating Homestead
 
-1. Place new version zip in `zip/` folder
-2. Run: `docker-compose restart`
-3. Old version is backed up automatically to `server-data/`
+1. Keep the old pack ZIP in `zip/` and add the newer server-pack ZIP.
+2. Restart with `docker compose restart`.
+3. The entrypoint selects the highest version, backs up the existing server, replaces Homestead-managed directories, preserves world and operator settings, and installs the pack's requested Fabric runtime.
 
-## Restore Backup
+Backups are written to `server-data/backups/`. Updates replace all six pack-managed directories (`config/`, `defaultconfigs/`, `kubejs/`, `mods/`, `patchouli_books/`, and `scripts/`) so removed files cannot leak into the new version. Custom mods must be re-added after an update.
 
-1. Copy backup zip (with `-backup-` in name) to `zip/` folder
-2. Run: `docker-compose restart`
+Downgrades are blocked automatically. Restore a backup instead of attempting to install an older pack over a newer world.
+
+## Restoring a backup
+
+1. Copy the desired backup from `server-data/backups/` into `zip/`.
+2. Set `RESTORE_BACKUP` in `docker-compose.yml` to that exact filename.
+3. Run `docker compose up -d`.
+4. Confirm the restored server starts, then remove `RESTORE_BACKUP` from Compose to resume normal pack updates.
+
+The same backup is restored only once while `RESTORE_BACKUP` remains set, preventing every restart from overwriting new progress.
 
 ## Settings
 
@@ -42,14 +63,37 @@ Edit `docker-compose.yml`:
 
 ```yaml
 environment:
-  - MEMORY=10G      # 512M, 2G, 4G, 6G, 8G, 12G, etc.
-  - EULA=true      # Must be true to start
+  MEMORY: 10G
+  EULA: "true"
+```
+
+`MEMORY` accepts whole-number values such as `8192M`, `8G`, `10G`, or `12G`, with a minimum of 2 GB. Leave enough memory for Docker and the host operating system.
+
+Setting `EULA=true` records acceptance of the [Minecraft EULA](https://www.minecraft.net/eula).
+
+## Data and ports
+
+- `zip/`: read-only server-pack and restore archives
+- `server-data/`: worlds, configuration, generated runtime, and backups
+- `25565/tcp`: Minecraft
+- `24454/udp`: proximity voice chat
+
+Both local directories are ignored by Git.
+
+## Validation
+
+Run the regression suite before publishing an image:
+
+```bash
+./tests/entrypoint_test.sh
+docker compose config
+docker build -t homestead-docker:local .
 ```
 
 ## Troubleshooting
 
-- **Won't start**: Check `EULA=true` in docker-compose.yml
-- **Out of memory**: Increase `MEMORY=10G` to `MEMORY=8G` or higher
-- **Can't connect**: Wait for "Done!" in logs
-
-View logs: `docker-compose logs -f`
+- **No server pack found:** Ensure the ZIP filename contains a version such as `1.3.7`.
+- **Out of memory:** Increase Docker's memory allocation or lower `MEMORY`.
+- **Cannot connect:** Wait for `Done` in `docker compose logs -f`.
+- **Update is rejected:** The selected ZIP is older than `.installed`; restore a backup for intentional rollbacks.
+- **Restore does not repeat:** Remove `RESTORE_BACKUP`, start once, then set it again or rename the backup file for an intentional second restore.
