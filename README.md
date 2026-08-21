@@ -104,16 +104,6 @@ Setting `EULA=true` records acceptance of the [Minecraft EULA](https://www.minec
 
 Both local directories are ignored by Git.
 
-## Validation
-
-Run the regression suite before publishing an image:
-
-```bash
-./tests/entrypoint_test.sh
-docker compose config
-docker build -t homestead-docker:local .
-```
-
 ## Troubleshooting
 
 - **No server pack found:** Ensure the ZIP filename contains a version such as `1.3.7`.

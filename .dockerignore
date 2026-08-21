@@ -11,7 +11,6 @@ zip/
 
 # Exclude development and CI files
 .github/
-tests/
 docker-compose.yml
 
 # Exclude IDE files
