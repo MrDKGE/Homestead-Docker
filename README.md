@@ -1,5 +1,6 @@
 # Homestead Minecraft Server - Docker
 
+[![GitHub](https://img.shields.io/badge/GitHub-MrDKGE%2FHomestead--Docker-181717?logo=github)](https://github.com/MrDKGE/Homestead-Docker)
 [![Docker Image Version](https://img.shields.io/docker/v/dkge/homestead-docker?logo=docker&label=Docker%20Hub)](https://hub.docker.com/r/dkge/homestead-docker)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dkge/homestead-docker?logo=docker&label=Pulls)](https://hub.docker.com/r/dkge/homestead-docker)
 
