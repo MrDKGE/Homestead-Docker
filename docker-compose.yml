@@ -2,7 +2,7 @@ services:
   homestead-server:
     build:
       context: .
-    image: ghcr.io/mrdkge/homestead-docker:latest
+    image: dkge/homestead-docker:latest
     restart: unless-stopped
     ports:
       - "25565:25565"  # Minecraft server port

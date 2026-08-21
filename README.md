@@ -1,5 +1,8 @@
 # Homestead Minecraft Server - Docker
 
+[![Docker Image Version](https://img.shields.io/docker/v/dkge/homestead-docker?logo=docker&label=Docker%20Hub)](https://hub.docker.com/r/dkge/homestead-docker)
+[![Docker Pulls](https://img.shields.io/docker/pulls/dkge/homestead-docker?logo=docker&label=Pulls)](https://hub.docker.com/r/dkge/homestead-docker)
+
 Run the Homestead modded Minecraft server with Docker. Java and the Fabric runtime are installed inside the image.
 
 ## Requirements
@@ -15,7 +18,7 @@ Run the Homestead modded Minecraft server with Docker. Java and the Fabric runti
 3. Start the server:
 
    ```bash
-   docker compose up -d --build
+   docker compose up -d
    ```
 
 4. Follow startup until Minecraft reports `Done`:
@@ -42,7 +45,8 @@ An exact version is selected even when newer ZIPs are present in `zip/`. It does
 ## Commands
 
 ```bash
-docker compose up -d --build  # Build and start
+docker compose pull           # Download the newest published image
+docker compose up -d          # Create and start
 docker compose stop           # Graceful stop and world save
 docker compose restart        # Restart
 docker compose logs -f        # Follow logs
@@ -58,6 +62,15 @@ docker compose down           # Remove the container and network; data remains
 Backups are written to `server-data/backups/`. Updates replace all six pack-managed directories (`config/`, `defaultconfigs/`, `kubejs/`, `mods/`, `patchouli_books/`, and `scripts/`) so removed files cannot leak into the new version. Custom mods must be re-added after an update.
 
 Downgrades are blocked automatically. Restore a backup instead of attempting to install an older pack over a newer world.
+
+## Updating the Docker image
+
+Pull the newest image and recreate the container without removing persistent server data:
+
+```bash
+docker compose pull
+docker compose up -d
+```
 
 ## Restoring a backup
 
